@@ -31,17 +31,22 @@ This repo is independent of that one — it does not touch or build from it.
 process has been *launched* first, not that it's fully warmed up or has found an
 inverter yet). On top of that, `predbat`'s own `run` script does an **additional
 bounded wait** for GivTCP's REST API (`WAIT_FOR_GIVTCP_URL`, default
-`http://127.0.0.1:8099/REST1/api`) before starting Predbat — confirmed live that
+`http://127.0.0.1:6345/readData`) before starting Predbat — confirmed live that
 Predbat talks to GivTCP directly over REST (not just via HA/MQTT entities), and
 without this wait it hits a stretch of "Connection refused" /
 "No register data cache exists yet" retries while GivTCP is still scanning for
-inverters. This mirrors a `dockerize -wait .../REST1/api` line already drafted in
-the standalone deployment's `docker-compose-swarm.yaml` but never switched on
-there. The wait is best-effort, not a hard gate: if it times out
-(`WAIT_FOR_GIVTCP_TIMEOUT`, default `90`s), Predbat starts anyway and falls back
-to its own internal retry/backoff, which already handles this gracefully on its
-own. **A handful of these retries on a genuinely cold first boot are expected and
-should self-resolve — not a bug in this image.**
+inverters. The standalone deployment's `docker-compose-swarm.yaml` had drafted
+(but never switched on) a `dockerize -wait .../REST1/api` line against GivTCP's
+nginx ingress port (8099) — confirmed live that endpoint actually 403s (nginx's
+ingress.conf gatekeeps it for HA Supervisor's own ingress proxy, not direct
+access), so it would never have worked. GivTCP's real per-inverter REST API
+answers directly on `6345` (base port; `+N-1` for inverter `N`) with no such
+gatekeeping, confirmed live to return a populated JSON body once ready — that's
+what's actually checked here. The wait is best-effort, not a hard gate: if it
+times out (`WAIT_FOR_GIVTCP_TIMEOUT`, default `90`s), Predbat starts anyway and
+falls back to its own internal retry/backoff, which already handles this
+gracefully on its own. **A handful of these retries on a genuinely cold first
+boot are expected and should self-resolve — not a bug in this image.**
 
 ## Known upstream issues
 
@@ -128,7 +133,7 @@ docker run -d \
 | `WAIT_FOR_HA_INTERVAL` | `10` | all three services |
 | `WAIT_FOR_HA_MAX_FAILS` | `3` | `wait-for-ha` only (consecutive failures before container restart) |
 | `DELAY_INTERVAL` | `10` | `givtcp`, `predbat` (extra settle time after HA becomes reachable) |
-| `WAIT_FOR_GIVTCP_URL` | `http://127.0.0.1:8099/REST1/api` | `predbat` only (set empty to disable) |
+| `WAIT_FOR_GIVTCP_URL` | `http://127.0.0.1:6345/readData` | `predbat` only (set empty to disable; `+N-1` to the port for inverter `N`) |
 | `WAIT_FOR_GIVTCP_TIMEOUT` | `90` | `predbat` only (seconds; falls through to Predbat's own retry if exceeded) |
 | `WAIT_FOR_GIVTCP_INTERVAL` | `5` | `predbat` only |
 

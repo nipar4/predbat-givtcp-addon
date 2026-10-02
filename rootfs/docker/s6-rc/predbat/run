@@ -27,14 +27,19 @@ fi
 # GivTCP readiness: Predbat talks to GivTCP directly over REST (not just via
 # HA/MQTT entities), confirmed live - without this it hits a stretch of
 # "Connection refused" / "No register data cache exists yet" retries while
-# GivTCP is still scanning for inverters. This mirrors the equivalent
-# dockerize wait ("-wait http://.../REST1/api") already drafted in the
-# standalone deployment's docker-compose-swarm.yaml but never switched on
-# there; same endpoint, now checked over localhost since both services share
-# this container. Predbat already retries this itself with its own backoff if
-# GivTCP still isn't ready once this returns, so a timeout here just falls
-# through rather than blocking Predbat from starting at all.
-: "${WAIT_FOR_GIVTCP_URL:=http://127.0.0.1:8099/REST1/api}"
+# GivTCP is still scanning for inverters. The standalone deployment's
+# docker-compose-swarm.yaml had drafted (but never switched on) a dockerize
+# wait against .../REST1/api on GivTCP's nginx ingress port (8099) - confirmed
+# live that endpoint actually 403s (nginx's ingress.conf gatekeeps it for HA
+# Supervisor's own ingress proxy, not direct access), so it would never have
+# worked as a readiness check. GivTCP's real per-inverter REST API answers
+# directly on 6345 (base port; +N-1 for inverter N) with no such gatekeeping -
+# confirmed live that /readData there returns a populated JSON body once ready
+# - so that's what's actually checked here instead. Predbat already retries
+# this itself with its own backoff if GivTCP still isn't ready once this
+# returns, so a timeout here just falls through rather than blocking Predbat
+# from starting at all.
+: "${WAIT_FOR_GIVTCP_URL:=http://127.0.0.1:6345/readData}"
 : "${WAIT_FOR_GIVTCP_TIMEOUT:=90}"
 : "${WAIT_FOR_GIVTCP_INTERVAL:=5}"
 
