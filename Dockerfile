@@ -5,7 +5,7 @@ ARG GIVTCP_VERSION
 # Single canonical GivTCP checkout, reused by both the node builder stage
 # (its Vue config UI) and the final stage (its Python source + requirements).
 # -------------------------------------------------
-FROM alpine:3.20 AS givtcp-src
+FROM alpine:3.24 AS givtcp-src
 ARG GIVTCP_VERSION
 WORKDIR /src
 ADD https://github.com/britkat1980/giv_tcp.git#${GIVTCP_VERSION} /src
@@ -22,7 +22,7 @@ ADD https://github.com/britkat1980/giv_tcp.git#${GIVTCP_VERSION} /src
 # the standard pattern for builder stages whose output doesn't depend on the
 # final image's target platform.
 # -------------------------------------------------
-FROM --platform=$BUILDPLATFORM node:22-alpine AS node-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS node-builder
 WORKDIR /app
 COPY --from=givtcp-src /src/givtcp-vuejs .
 RUN npm install && npm run build && mv dist/index.html dist/config.html
