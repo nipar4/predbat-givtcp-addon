@@ -12,9 +12,17 @@ ADD https://github.com/britkat1980/giv_tcp.git#${GIVTCP_VERSION} /src
 
 # -------------------------------------------------
 # GivTCP's Vue config UI (mirrors GivTCP's own Dockerfile's first stage:
-# node:current-alpine there is pinned here instead, everything else the same)
+# node:current-alpine there is pinned here instead, everything else the same).
+# Pinned to --platform=$BUILDPLATFORM deliberately: this stage only produces
+# platform-independent static JS/CSS/HTML assets, but `npm run build` crashes
+# under QEMU's arm64 emulation (confirmed in CI: "qemu: uncaught target signal
+# 4 (Illegal instruction)" - Node's V8 JIT uses instructions QEMU's user-mode
+# emulation doesn't fully support). Building it natively on the runner's own
+# architecture instead of emulating the target one avoids this entirely and is
+# the standard pattern for builder stages whose output doesn't depend on the
+# final image's target platform.
 # -------------------------------------------------
-FROM node:22-alpine AS node-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-builder
 WORKDIR /app
 COPY --from=givtcp-src /src/givtcp-vuejs .
 RUN npm install && npm run build && mv dist/index.html dist/config.html
