@@ -37,16 +37,35 @@ without this wait it hits a stretch of "Connection refused" /
 "No register data cache exists yet" retries while GivTCP is still scanning for
 inverters. The standalone deployment's `docker-compose-swarm.yaml` had drafted
 (but never switched on) a `dockerize -wait .../REST1/api` line against GivTCP's
-nginx ingress port (8099) — confirmed live that endpoint actually 403s (nginx's
-ingress.conf gatekeeps it for HA Supervisor's own ingress proxy, not direct
-access), so it would never have worked. GivTCP's real per-inverter REST API
-answers directly on `6345` (base port; `+N-1` for inverter `N`) with no such
-gatekeeping, confirmed live to return a populated JSON body once ready — that's
-what's actually checked here. The wait is best-effort, not a hard gate: if it
-times out (`WAIT_FOR_GIVTCP_TIMEOUT`, default `90`s), Predbat starts anyway and
-falls back to its own internal retry/backoff, which already handles this
-gracefully on its own. **A handful of these retries on a genuinely cold first
-boot are expected and should self-resolve — not a bug in this image.**
+nginx ingress port (8099) — confirmed live that endpoint actually 403s. GivTCP's
+`ingress.conf` has an explicit `allow 10.0.0.0/8; allow 172.16.0.0/12; allow
+192.168.0.0/16; deny all;` — it allows real LAN-range source addresses (which is
+why it worked from another host in the standalone deployment) but **not
+`127.0.0.0/8`**, so a same-container request to it over loopback always 403s
+regardless of readiness. GivTCP's real per-inverter REST API answers directly on
+`6345` (base port; `+N-1` for inverter `N`) with no such restriction, confirmed
+live to return a populated JSON body once ready — that's what's actually checked
+here. The wait is best-effort, not a hard gate: if it times out
+(`WAIT_FOR_GIVTCP_TIMEOUT`, default `90`s), Predbat starts anyway and falls back
+to its own internal retry/backoff, which already handles this gracefully on its
+own. **A handful of these retries on a genuinely cold first boot are expected and
+should self-resolve — not a bug in this image.**
+
+## Migrating from a standalone deployment
+
+If you're moving from separate Predbat and GivTCP containers to this combined
+image, **update `givtcp_rest` in your `secrets.yaml`** (or wherever your
+`apps.yaml` sources it from) from GivTCP's old external host:port
+(`http://<old-givtcp-host>:8099/REST1`) to `http://127.0.0.1:6345` (increment the
+port per extra inverter, same as GivTCP's own convention). Confirmed live: the
+old value keeps resolving to wherever GivTCP used to run standalone, which no
+longer has anything listening on it once GivTCP moves into this combined image —
+Predbat's own retry/backoff masks this as a stretch of "Connection refused"
+errors rather than a hard failure, so it's easy to miss. Don't point this at
+`http://127.0.0.1:8099/REST1` either — that goes through GivTCP's nginx ingress
+proxy, which 403s loopback requests regardless of host (see above); `6345`
+bypasses nginx entirely and has no such restriction, and it works identically no
+matter which host ends up running this image.
 
 ## Known upstream issues
 
