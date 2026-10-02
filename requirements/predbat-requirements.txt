@@ -1,0 +1,13 @@
+pytz
+requests
+pyyaml
+aiofiles
+aiohttp
+aiomqtt
+Jinja2
+ruamel.yaml==0.18.17
+pyjwt
+numpy==2.3.5
+prometheus-client
+protobuf
+pvlib
