@@ -28,38 +28,33 @@ COPY --from=givtcp-src /src/givtcp-vuejs .
 RUN npm install && npm run build && mv dist/index.html dist/config.html
 
 # -------------------------------------------------
-# Predbat's own venv
+# Both apps' Python deps, installed system-wide into one shared /install
+# prefix (copied to /usr/local/ in the final stage below) - NOT isolated
+# venvs. An earlier isolated-venv design broke both apps: GivTCP's own code
+# hardcodes absolute paths like /usr/local/bin/gunicorn when it re-execs its
+# own subprocesses, and predbat_addon's own fork-maintained startup.py wrapper
+# (rootfs/predbat/startup.py) does `os.system("...; python3 /addon/hass.py")`
+# - a bare, PATH-resolved python3 call - so both apps assume a single
+# system-wide interpreter already has their dependencies, matching how
+# predbat_addon's own Dockerfile.alpine and GivTCP's own upstream Dockerfile
+# both already install (both confirmed live, via FileNotFoundError boot
+# failures under venv isolation). Installing both into one prefix in a single
+# RUN (not two separate stages copied on top of each other) lets pip's own
+# resolver reconcile any shared transitive dependency once, rather than
+# risking two independent resolutions disagreeing and silently overwriting
+# each other's files - in practice they already agree (both independently
+# resolved Jinja2 to the identical version before this change).
 # -------------------------------------------------
-FROM ${BASE_IMAGE} AS predbat-builder
+FROM ${BASE_IMAGE} AS app-builder
 WORKDIR /install
-COPY requirements/predbat-requirements.txt /requirements.txt
+COPY requirements/predbat-requirements.txt /predbat-requirements.txt
+COPY --from=givtcp-src /src/requirements.txt /givtcp-requirements.txt
 
 # hadolint ignore=DL3018
 RUN set -eux; \
     apk add --no-cache --virtual .build-deps gcc g++ libffi-dev musl-dev; \
-    python3 -m venv /opt/predbat-venv; \
-    /opt/predbat-venv/bin/pip install --no-cache-dir -r /requirements.txt
-
-# -------------------------------------------------
-# GivTCP's own deps, straight from its own (unforked) requirements.txt,
-# installed system-wide (--prefix=/install, copied to /usr/local/ below) -
-# NOT an isolated venv. GivTCP's own code hardcodes absolute paths like
-# /usr/local/bin/gunicorn and /usr/local/bin/python3 when it re-execs its own
-# subprocesses (confirmed by grepping its source and by a live boot test that
-# failed with FileNotFoundError until this was changed from a venv), so it
-# needs its deps on the system path it already expects - exactly matching both
-# GivTCP's own upstream Dockerfile and predbat_addon's own existing convention.
-# Predbat has no such hardcoded paths (confirmed by the same grep against its
-# source) and is always invoked via its own fully-qualified venv path, so
-# giving it its own isolated venv above remains safe and conflict-free even
-# though GivTCP's deps land in the shared system site-packages.
-# No C toolchain here - confirmed via a clean build that every GivTCP
-# dependency has a musl wheel available.
-# -------------------------------------------------
-FROM ${BASE_IMAGE} AS givtcp-builder
-WORKDIR /install
-COPY --from=givtcp-src /src/requirements.txt /requirements.txt
-RUN pip install --no-cache-dir --prefix=/install -r /requirements.txt
+    pip install --no-cache-dir --prefix=/install -r /predbat-requirements.txt; \
+    pip install --no-cache-dir --prefix=/install -r /givtcp-requirements.txt
 
 # -------------------------------------------------
 # s6-overlay builder (identical pattern to predbat_addon's own)
@@ -125,12 +120,9 @@ RUN set -eux; \
 # s6-overlay
 COPY --from=s6-builder /s6-root/ /
 
-# Python deps - Predbat gets its own isolated venv (see predbat-builder stage);
-# GivTCP's deps land in the normal system site-packages (see givtcp-builder
-# stage for why) - the two don't actually conflict since Predbat is always
-# invoked via its own fully-qualified venv path, never via bare `python3`.
-COPY --from=predbat-builder /opt/predbat-venv /opt/predbat-venv
-COPY --from=givtcp-builder /install /usr/local/
+# Python deps for both apps - see app-builder stage for why these are a
+# single shared system-wide install rather than isolated venvs.
+COPY --from=app-builder /install /usr/local/
 
 # Predbat source - fetched straight from GitHub, never vendored, exactly like
 # predbat_addon's own Dockerfile.alpine
@@ -138,6 +130,12 @@ ADD --chown=${USER_NAME} \
     https://github.com/springfall2008/batpred.git#$PREDBAT_VERSION:apps/predbat/ \
     https://github.com/springfall2008/batpred.git#$PREDBAT_VERSION:apps/predbat/config/ \
     /addon/
+# startup.py is NOT part of batpred upstream - it's predbat_addon's own
+# fork-maintained launcher (confirmed: batpred's apps/predbat/ tree at the
+# pinned PREDBAT_VERSION has no startup.py of its own, only hass.py - the real
+# entrypoint startup.py execs via `os.system("...; python3 /addon/hass.py")`).
+# Mirrored from predbat_addon's own predbat/rootfs/alpine/startup.py.
+COPY --chown=${USER_NAME} rootfs/predbat/startup.py /addon/startup.py
 COPY --chown=${USER_NAME} rootfs/predbat/run.docker.sh /addon/run.docker.sh
 
 # GivTCP source - fetched straight from GitHub, never vendored

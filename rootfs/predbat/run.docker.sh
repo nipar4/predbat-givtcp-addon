@@ -24,5 +24,8 @@ done
 
 echo "[predbat] Starting Predbat"
 
-# Startup
-exec /opt/predbat-venv/bin/python3 /addon/startup.py
+# Startup - plain `python3` (system site-packages, not a venv): startup.py
+# itself shells out to hass.py via a bare, PATH-resolved `python3` call, so
+# deps need to live where that resolves - see the Dockerfile's app-builder
+# stage comment for why.
+exec python3 /addon/startup.py
