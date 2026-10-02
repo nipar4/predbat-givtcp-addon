@@ -29,12 +29,19 @@ This repo is independent of that one — it does not touch or build from it.
 
 `predbat`'s dependency on `givtcp` is ordering only (s6-rc guarantees `givtcp`'s
 process has been *launched* first, not that it's fully warmed up or has found an
-inverter yet). Predbat is not given a GivTCP-specific readiness check — its actual
-dependency is on HA *entities* GivTCP populates via MQTT, which is an
-eventually-consistent path Predbat already needs to tolerate as normal long-running
-operation. **A handful of "entity not found" warnings on a genuinely cold first
-boot are expected and should self-resolve within Predbat's own polling cycle — not
-a bug in this image.**
+inverter yet). On top of that, `predbat`'s own `run` script does an **additional
+bounded wait** for GivTCP's REST API (`WAIT_FOR_GIVTCP_URL`, default
+`http://127.0.0.1:8099/REST1/api`) before starting Predbat — confirmed live that
+Predbat talks to GivTCP directly over REST (not just via HA/MQTT entities), and
+without this wait it hits a stretch of "Connection refused" /
+"No register data cache exists yet" retries while GivTCP is still scanning for
+inverters. This mirrors a `dockerize -wait .../REST1/api` line already drafted in
+the standalone deployment's `docker-compose-swarm.yaml` but never switched on
+there. The wait is best-effort, not a hard gate: if it times out
+(`WAIT_FOR_GIVTCP_TIMEOUT`, default `90`s), Predbat starts anyway and falls back
+to its own internal retry/backoff, which already handles this gracefully on its
+own. **A handful of these retries on a genuinely cold first boot are expected and
+should self-resolve — not a bug in this image.**
 
 ## Known upstream issues
 
@@ -121,6 +128,9 @@ docker run -d \
 | `WAIT_FOR_HA_INTERVAL` | `10` | all three services |
 | `WAIT_FOR_HA_MAX_FAILS` | `3` | `wait-for-ha` only (consecutive failures before container restart) |
 | `DELAY_INTERVAL` | `10` | `givtcp`, `predbat` (extra settle time after HA becomes reachable) |
+| `WAIT_FOR_GIVTCP_URL` | `http://127.0.0.1:8099/REST1/api` | `predbat` only (set empty to disable) |
+| `WAIT_FOR_GIVTCP_TIMEOUT` | `90` | `predbat` only (seconds; falls through to Predbat's own retry if exceeded) |
+| `WAIT_FOR_GIVTCP_INTERVAL` | `5` | `predbat` only |
 
 GivTCP's own many configuration options live in `/config/GivTCP/allsettings.json`
 (auto-bootstrapped on first run) rather than environment variables — edit it

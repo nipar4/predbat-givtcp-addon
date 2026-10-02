@@ -24,5 +24,37 @@ else
     echo "[predbat] HA waiting disabled (env vars not set)"
 fi
 
+# GivTCP readiness: Predbat talks to GivTCP directly over REST (not just via
+# HA/MQTT entities), confirmed live - without this it hits a stretch of
+# "Connection refused" / "No register data cache exists yet" retries while
+# GivTCP is still scanning for inverters. This mirrors the equivalent
+# dockerize wait ("-wait http://.../REST1/api") already drafted in the
+# standalone deployment's docker-compose-swarm.yaml but never switched on
+# there; same endpoint, now checked over localhost since both services share
+# this container. Predbat already retries this itself with its own backoff if
+# GivTCP still isn't ready once this returns, so a timeout here just falls
+# through rather than blocking Predbat from starting at all.
+: "${WAIT_FOR_GIVTCP_URL:=http://127.0.0.1:8099/REST1/api}"
+: "${WAIT_FOR_GIVTCP_TIMEOUT:=90}"
+: "${WAIT_FOR_GIVTCP_INTERVAL:=5}"
+
+if [ -n "$WAIT_FOR_GIVTCP_URL" ]; then
+    echo "[predbat] waiting up to ${WAIT_FOR_GIVTCP_TIMEOUT}s for GivTCP at ${WAIT_FOR_GIVTCP_URL}"
+    elapsed=0
+    while [ "$elapsed" -lt "$WAIT_FOR_GIVTCP_TIMEOUT" ]; do
+        if wget -q -O /dev/null --timeout=5 "$WAIT_FOR_GIVTCP_URL" 2>/dev/null; then
+            echo "[predbat] GivTCP is responding"
+            break
+        fi
+        sleep "$WAIT_FOR_GIVTCP_INTERVAL"
+        elapsed=$((elapsed + WAIT_FOR_GIVTCP_INTERVAL))
+    done
+    if [ "$elapsed" -ge "$WAIT_FOR_GIVTCP_TIMEOUT" ]; then
+        echo "[predbat] GivTCP wait timed out after ${WAIT_FOR_GIVTCP_TIMEOUT}s, starting Predbat anyway (it retries internally)"
+    fi
+else
+    echo "[predbat] GivTCP waiting disabled (WAIT_FOR_GIVTCP_URL set empty)"
+fi
+
 echo "[predbat] starting Predbat"
 exec /addon/run.docker.sh
